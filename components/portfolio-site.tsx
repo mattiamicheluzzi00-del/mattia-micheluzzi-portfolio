@@ -26,7 +26,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const CONTACT_EMAIL = "mattia.micheluzzi@example.com";
+const WEB3FORMS_ENDPOINT = "https://api.web3forms.com/submit";
+const WEB3FORMS_ACCESS_KEY = "85994f73-9c32-45fa-9285-0702774bd19b";
+const WEB3FORMS_FROM_NAME = "Mattia Micheluzzi Portfolio";
 const LANGUAGE_HINT_KEY = "mattia-language-hint-seen";
 
 type Locale = "it" | "en" | "de";
@@ -414,15 +416,36 @@ const fadeUp = {
   visible: { opacity: 1, y: 0 }
 };
 
-function encodeMailto(subject: string, body: string) {
-  return `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(
-    subject
-  )}&body=${encodeURIComponent(body)}`;
-}
+type Web3FormsResponse = {
+  success?: boolean;
+  message?: string;
+};
 
-function submitMail(event: FormEvent<HTMLFormElement>, href: string) {
-  event.preventDefault();
-  window.location.href = href;
+type SubmissionStatus = "idle" | "sending" | "success" | "error";
+
+async function submitWeb3Forms(payload: Record<string, string>) {
+  const formData = new FormData();
+  formData.append("access_key", WEB3FORMS_ACCESS_KEY);
+  formData.append("from_name", WEB3FORMS_FROM_NAME);
+  formData.append("botcheck", "");
+
+  for (const [key, value] of Object.entries(payload)) {
+    formData.append(key, value);
+  }
+
+  const response = await fetch(WEB3FORMS_ENDPOINT, {
+    method: "POST",
+    body: formData
+  });
+  const data = (await response.json().catch(() => null)) as
+    | Web3FormsResponse
+    | null;
+
+  if (!response.ok || data?.success === false) {
+    throw new Error(data?.message ?? "Invio non riuscito.");
+  }
+
+  return data;
 }
 
 export default function HomePage() {
@@ -1569,28 +1592,45 @@ function BookingForm() {
     email: "",
     notes: ""
   });
+  const [submitState, setSubmitState] = useState<SubmissionStatus>("idle");
+  const [submitMessage, setSubmitMessage] = useState("");
 
-  const bookingHref = useMemo(
-    () =>
-      encodeMailto(
-        `Richiesta prenotazione: ${booking.service}`,
-        [
-          `Nome: ${booking.name}`,
-          `Email: ${booking.email}`,
-          `Servizio: ${booking.service}`,
-          `Data: ${booking.date}`,
-          `Ora: ${booking.time}`,
-          "",
-          "Note:",
-          booking.notes
-        ].join("\n")
-      ),
-    [booking]
-  );
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitState("sending");
+    setSubmitMessage("");
+
+    try {
+      await submitWeb3Forms({
+        subject: `Richiesta prenotazione: ${booking.service}`,
+        email: booking.email,
+        service: booking.service,
+        date: booking.date,
+        time: booking.time,
+        name: booking.name,
+        message: booking.notes
+      });
+      setSubmitState("success");
+      setSubmitMessage("Richiesta inviata con successo.");
+      setBooking({
+        service: booking.service,
+        date: "",
+        time: "",
+        name: "",
+        email: "",
+        notes: ""
+      });
+    } catch (error) {
+      setSubmitState("error");
+      setSubmitMessage(
+        error instanceof Error ? error.message : "Invio non riuscito."
+      );
+    }
+  }
 
   return (
     <form
-      onSubmit={(event) => submitMail(event, bookingHref)}
+      onSubmit={handleSubmit}
       className="grid gap-4 rounded-[8px] border border-line bg-white p-5 shadow-card sm:p-6 lg:grid-cols-2"
     >
       <Field label="Tipo di incontro">
@@ -1666,10 +1706,22 @@ function BookingForm() {
         </Field>
       </div>
       <div className="lg:col-span-2">
-        <button className="inline-flex h-12 w-full items-center justify-center rounded-full bg-ink px-6 text-sm font-semibold text-white transition hover:bg-zinc-800 sm:w-auto">
-          Invia richiesta
+        <button
+          disabled={submitState === "sending"}
+          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-ink px-6 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300 sm:w-auto"
+        >
+          {submitState === "sending" ? "Invio in corso..." : "Invia richiesta"}
           <Send className="ml-2 h-4 w-4" aria-hidden="true" />
         </button>
+        {submitMessage ? (
+          <p
+            className={`mt-3 text-sm ${
+              submitState === "success" ? "text-emerald-600" : "text-rose-600"
+            }`}
+          >
+            {submitMessage}
+          </p>
+        ) : null}
       </div>
     </form>
   );
@@ -1677,6 +1729,31 @@ function BookingForm() {
 
 function ContactLayout() {
   const [contact, setContact] = useState({ name: "", email: "", message: "" });
+  const [submitState, setSubmitState] = useState<SubmissionStatus>("idle");
+  const [submitMessage, setSubmitMessage] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitState("sending");
+    setSubmitMessage("");
+
+    try {
+      await submitWeb3Forms({
+        subject: "Nuovo messaggio dal portfolio",
+        name: contact.name,
+        email: contact.email,
+        message: contact.message
+      });
+      setSubmitState("success");
+      setSubmitMessage("Messaggio inviato con successo.");
+      setContact({ name: "", email: "", message: "" });
+    } catch (error) {
+      setSubmitState("error");
+      setSubmitMessage(
+        error instanceof Error ? error.message : "Invio non riuscito."
+      );
+    }
+  }
 
   return (
     <div>
@@ -1687,21 +1764,7 @@ function ContactLayout() {
       </p>
       <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
       <form
-        onSubmit={(event) =>
-          submitMail(
-            event,
-            encodeMailto(
-              `Contatto portfolio da ${contact.name || "visitatore"}`,
-              [
-                `Nome: ${contact.name}`,
-                `Email: ${contact.email}`,
-                "",
-                "Messaggio:",
-                contact.message
-              ].join("\n")
-            )
-          )
-        }
+        onSubmit={handleSubmit}
         className="rounded-[8px] border border-line bg-white p-5 shadow-card sm:p-6"
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -1742,10 +1805,22 @@ function ContactLayout() {
             />
           </Field>
         </div>
-        <button className="mt-5 inline-flex h-12 w-full items-center justify-center rounded-full bg-ink px-6 text-sm font-semibold text-white transition hover:bg-zinc-800 sm:w-auto">
-          Invia messaggio
+        <button
+          disabled={submitState === "sending"}
+          className="mt-5 inline-flex h-12 w-full items-center justify-center rounded-full bg-ink px-6 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300 sm:w-auto"
+        >
+          {submitState === "sending" ? "Invio in corso..." : "Invia messaggio"}
           <Send className="ml-2 h-4 w-4" aria-hidden="true" />
         </button>
+        {submitMessage ? (
+          <p
+            className={`mt-3 text-sm ${
+              submitState === "success" ? "text-emerald-600" : "text-rose-600"
+            }`}
+          >
+            {submitMessage}
+          </p>
+        ) : null}
       </form>
 
       <aside className="rounded-[8px] border border-line bg-mist p-6">
@@ -2012,40 +2087,10 @@ function BookingPlanner() {
       return availableSlots[0] ?? "";
     });
   }, [availableSlots, selectedDate]);
+  const [submitState, setSubmitState] = useState<SubmissionStatus>("idle");
+  const [submitMessage, setSubmitMessage] = useState("");
 
-  const bookingHref = useMemo(() => {
-    const prefix = fullBookingPrefixList.find(
-      (option) => option.code === booking.phonePrefix
-    );
-    const phone = prefix
-      ? `+${getCountryCallingCode(prefix.code)} ${booking.phoneNumber}`
-      : booking.phoneNumber;
-    const lines = [
-      `Nome e cognome: ${booking.fullName}`,
-      `Email: ${booking.email}`,
-      `Telefono: ${phone || "-"}`,
-      `Data: ${selectedLabel || "-"}`,
-      `Fascia oraria: ${selectedSlot || "-"}`,
-      "",
-      "Note:",
-      booking.notes
-    ];
-
-    return encodeMailto(
-      `Richiesta prenotazione${selectedLabel ? ` - ${selectedLabel}` : ""}`,
-      lines.join("\n")
-    );
-  }, [
-    booking.email,
-    booking.fullName,
-    booking.notes,
-    booking.phoneNumber,
-    booking.phonePrefix,
-    selectedLabel,
-    selectedSlot
-  ]);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
       !selectedDate ||
@@ -2058,13 +2103,62 @@ function BookingPlanner() {
       return;
     }
 
+    setSubmitState("sending");
+    setSubmitMessage("");
+
     const nextCounts = {
       ...bookingCounts,
       [selectedDate]: Math.min((bookingCounts[selectedDate] ?? 0) + 1, 2)
     };
-    setBookingCounts(nextCounts);
-    saveBookingCounts(nextCounts);
-    window.location.href = bookingHref;
+
+    const prefix = fullBookingPrefixList.find(
+      (option) => option.code === booking.phonePrefix
+    );
+    const phone = prefix
+      ? `+${getCountryCallingCode(prefix.code)} ${booking.phoneNumber}`
+      : booking.phoneNumber;
+
+    try {
+      await submitWeb3Forms({
+        subject: `Richiesta prenotazione${selectedLabel ? ` - ${selectedLabel}` : ""}`,
+        full_name: booking.fullName,
+        email: booking.email,
+        phone_prefix: booking.phonePrefix,
+        phone_number: booking.phoneNumber,
+        phone,
+        date: selectedLabel || "-",
+        time: selectedSlot || "-",
+        notes: booking.notes,
+        message: [
+          `Nome e cognome: ${booking.fullName}`,
+          `Email: ${booking.email}`,
+          `Telefono: ${phone || "-"}`,
+          `Data: ${selectedLabel || "-"}`,
+          `Fascia oraria: ${selectedSlot || "-"}`,
+          "",
+          "Note:",
+          booking.notes
+        ].join("\n")
+      });
+
+      setBookingCounts(nextCounts);
+      saveBookingCounts(nextCounts);
+      setSubmitState("success");
+      setSubmitMessage("Richiesta inviata con successo.");
+      setBooking({
+        fullName: "",
+        email: "",
+        phonePrefix: "IT",
+        phoneNumber: "",
+        notes: ""
+      });
+      setSelectedSlot("");
+    } catch (error) {
+      setSubmitState("error");
+      setSubmitMessage(
+        error instanceof Error ? error.message : "Invio non riuscito."
+      );
+    }
   }
 
   return (
@@ -2289,6 +2383,7 @@ function BookingPlanner() {
             <button
               type="submit"
               disabled={
+                submitState === "sending" ||
                 !selectedDate ||
                 !selectedSlot ||
                 selectedStatus !== "available" ||
@@ -2298,9 +2393,18 @@ function BookingPlanner() {
               }
               className="inline-flex h-12 w-full items-center justify-center rounded-full bg-ink px-6 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300 sm:w-auto"
             >
-              Invia richiesta
+              {submitState === "sending" ? "Invio in corso..." : "Invia richiesta"}
               <Send className="ml-2 h-4 w-4" aria-hidden="true" />
             </button>
+            {submitMessage ? (
+              <p
+                className={`mt-3 text-sm ${
+                  submitState === "success" ? "text-emerald-600" : "text-rose-600"
+                }`}
+              >
+                {submitMessage}
+              </p>
+            ) : null}
           </div>
         </form>
       </section>
